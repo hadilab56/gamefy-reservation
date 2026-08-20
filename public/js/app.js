@@ -315,20 +315,9 @@
       return ma - mb;
     });
 
-    // Determine horizontal time axis range (10:00 to 00:00 / 02:00 default)
-    let minHour = 10;
-    let maxHour = 24; // 00:00 midnight
-
-    sorted.forEach(r => {
-      const info = getLeavingTimeInfo(r);
-      if (info.startMins !== null) {
-        const startH = Math.floor(info.startMins / 60);
-        const endH = Math.ceil(info.endMins / 60);
-        if (startH < minHour) minHour = Math.max(0, startH - 1);
-        if (endH > maxHour) maxHour = Math.min(28, endH + 1);
-      }
-    });
-
+    // Fixed full-day hourly timeline (10:00 AM to 02:00 AM - 16 hours span, non-adjustable)
+    const minHour = 10;
+    const maxHour = 26; // 02:00 AM next day
     const totalHours = maxHour - minHour;
     const minMins = minHour * 60;
     const maxMins = maxHour * 60;
@@ -769,6 +758,77 @@
     }
   }
 
+  // ---- SMART REAL-TIME STATION CONFLICT CHECKER ----
+  async function updateStationAvailabilityInModal() {
+    const dateInput = $('#res-date');
+    const arrivalInput = $('#res-arrival');
+    const leavingInput = $('#res-leaving');
+    const durationInput = $('#res-duration');
+
+    const dateVal = dateInput.value;
+    const arrivalVal = arrivalInput.value;
+    if (!dateVal || !arrivalVal) {
+      // If date or arrival time not yet entered, enable all chips
+      $$('#station-picker .station-chip').forEach(chip => {
+        chip.classList.remove('station-disabled');
+        const input = chip.querySelector('input');
+        if (input) input.disabled = false;
+        chip.removeAttribute('title');
+      });
+      return;
+    }
+
+    const startMins = timeStrToMinutes(arrivalVal);
+    if (startMins === null) return;
+
+    let endMins = timeStrToMinutes(leavingInput.value);
+    if (endMins === null || endMins <= startMins) {
+      const durMins = getEstimatedDurationMinutes(durationInput.value);
+      endMins = startMins + durMins;
+    }
+
+    try {
+      const { reservations } = await api.getReservations({ date: dateVal, limit: 100 });
+      const activeRes = reservations.filter(r => 
+        r.status !== 'cancelled' && 
+        (!state.editingId || r._id !== state.editingId)
+      );
+
+      $$('#station-picker .station-chip').forEach(chip => {
+        const input = chip.querySelector('input');
+        if (!input) return;
+        const stationName = input.value;
+
+        // Check if any active reservation is using this station during overlapping time window
+        const conflict = activeRes.find(r => {
+          if (!r.stations.includes(stationName)) return false;
+          const rInfo = getLeavingTimeInfo(r);
+          const rStart = rInfo.startMins;
+          const rEnd = rInfo.endMins;
+          if (rStart === null) return false;
+          // Overlap: startA < endB && endA > startB
+          return startMins < rEnd && endMins > rStart;
+        });
+
+        if (conflict) {
+          chip.classList.add('station-disabled');
+          input.disabled = true;
+          if (input.checked) {
+            input.checked = false;
+          }
+          const confInfo = getLeavingTimeInfo(conflict);
+          chip.title = `❌ Occupied by ${conflict.name} (${conflict.arrivalTime} → ${confInfo.leavingTime})`;
+        } else {
+          chip.classList.remove('station-disabled');
+          input.disabled = false;
+          chip.title = `✅ ${stationName} is available`;
+        }
+      });
+    } catch (err) {
+      console.error('Station availability check error:', err);
+    }
+  }
+
   // ---- MODAL ----
   function openReservationModal(reservation = null) {
     const modal = $('#reservation-modal');
@@ -791,6 +851,7 @@
       $$('#station-picker input').forEach(cb => {
         cb.checked = reservation.stations.includes(cb.value);
       });
+      updateStationAvailabilityInModal();
     } else {
       state.editingId = null;
       $('#modal-title').textContent = 'New Reservation';
@@ -798,6 +859,7 @@
       $('#res-date').value = formatDateISO(new Date());
       $('#res-id').value = '';
       $$('#station-picker input').forEach(cb => { cb.checked = false; });
+      updateStationAvailabilityInModal();
     }
   }
 
@@ -819,11 +881,49 @@
     const stations = [];
     $$('#station-picker input:checked').forEach(cb => stations.push(cb.value));
 
-    const stationType = stations.includes('VIP Room') ? 'vip' : 'pc';
+    const stationType = stations.includes('VIP Room') ? 'vip' : (stations.some(s => s.startsWith('PS5')) ? 'ps5' : 'pc');
 
     if (!name || !date || !arrivalTime) {
       showToast('Name, date, and arrival time are required', 'error');
       return;
+    }
+
+    if (!stations.length) {
+      showToast('Please select at least one station', 'error');
+      return;
+    }
+
+    // Final conflict check before saving
+    const startMins = timeStrToMinutes(arrivalTime);
+    let endMins = timeStrToMinutes(leavingTime);
+    if (endMins === null || endMins <= startMins) {
+      endMins = startMins + getEstimatedDurationMinutes(duration);
+    }
+
+    try {
+      const { reservations: dayReservations } = await api.getReservations({ date, limit: 100 });
+      const conflictingStations = [];
+      dayReservations.forEach(r => {
+        if (r.status === 'cancelled') return;
+        if (state.editingId && r._id === state.editingId) return;
+        const rInfo = getLeavingTimeInfo(r);
+        if (rInfo.startMins === null) return;
+        if (startMins < rInfo.endMins && endMins > rInfo.startMins) {
+          stations.forEach(s => {
+            if (r.stations.includes(s)) {
+              conflictingStations.push({ station: s, name: r.name, time: `${r.arrivalTime} → ${rInfo.leavingTime}` });
+            }
+          });
+        }
+      });
+
+      if (conflictingStations.length > 0) {
+        const msg = conflictingStations.map(c => `${c.station} is already booked by ${c.name} (${c.time})`).join(', ');
+        showToast(`Cannot book: ${msg}`, 'error');
+        return;
+      }
+    } catch (err) {
+      console.error('Conflict check error:', err);
     }
 
     const data = { name, phone, date, arrivalTime, leavingTime, duration, stations, stationType, notes, status };
@@ -1000,6 +1100,15 @@
     $('#modal-cancel').addEventListener('click', closeReservationModal);
     $('#reservation-modal .modal-overlay').addEventListener('click', closeReservationModal);
     $('#modal-save').addEventListener('click', saveReservation);
+
+    // Live station conflict checker when changing date or times in modal
+    ['#res-date', '#res-arrival', '#res-leaving', '#res-duration'].forEach(sel => {
+      const el = $(sel);
+      if (el) {
+        el.addEventListener('input', updateStationAvailabilityInModal);
+        el.addEventListener('change', updateStationAvailabilityInModal);
+      }
+    });
 
     // Delete modal
     $('#delete-modal-close').addEventListener('click', closeDeleteModal);

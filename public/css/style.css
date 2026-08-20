@@ -2171,6 +2171,38 @@ input[type="time"]::-webkit-calendar-picker-indicator {
   border-color: #3b82f6;
 }
 
+.station-chip.station-disabled {
+  cursor: not-allowed !important;
+  opacity: 0.42;
+  position: relative;
+}
+
+.station-chip.station-disabled span {
+  background: rgba(239, 68, 68, 0.08) !important;
+  border-color: rgba(239, 68, 68, 0.3) !important;
+  color: var(--text-muted) !important;
+  text-decoration: line-through;
+  pointer-events: none;
+}
+
+.station-chip.station-disabled:hover span {
+  border-color: rgba(239, 68, 68, 0.3) !important;
+}
+
+.station-conflict-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-sm);
+  color: var(--red-400);
+  font-size: 0.78rem;
+  font-weight: 600;
+  margin-top: 8px;
+}
+
 /* ========================================
    TOAST NOTIFICATIONS
    ======================================== */
