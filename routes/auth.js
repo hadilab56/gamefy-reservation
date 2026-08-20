@@ -3,13 +3,63 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const { query, formatUser, logActivity } = require('../db');
 
+// In-memory online presence map
+const activeOnlineUsers = new Map();
+
+function trackUserPresence(user) {
+  if (!user || !user.id) return;
+  activeOnlineUsers.set(user.id.toString(), {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName || user.username,
+    role: user.role || 'admin',
+    lastSeen: Date.now()
+  });
+}
+
+function getOnlineUsers() {
+  const now = Date.now();
+  const threshold = 45 * 1000; // 45 seconds
+  const list = [];
+  for (const [id, u] of activeOnlineUsers.entries()) {
+    if (now - u.lastSeen <= threshold) {
+      list.push(u);
+    } else {
+      activeOnlineUsers.delete(id);
+    }
+  }
+  return list;
+}
+
 // Middleware to check if user is authenticated
 function requireAuth(req, res, next) {
   if (req.session && req.session.userId) {
+    trackUserPresence({
+      id: req.session.userId,
+      username: req.session.username,
+      displayName: req.session.displayName || req.session.username,
+      role: req.session.role
+    });
     return next();
   }
   return res.status(401).json({ error: 'Authentication required' });
 }
+
+// Heartbeat & Online users list
+router.post('/heartbeat', requireAuth, (req, res) => {
+  trackUserPresence({
+    id: req.session.userId,
+    username: req.session.username,
+    displayName: req.session.displayName || req.session.username,
+    role: req.session.role
+  });
+  res.json({ onlineUsers: getOnlineUsers() });
+});
+
+router.get('/online', (req, res) => {
+  res.json({ onlineUsers: getOnlineUsers() });
+});
+
 
 // Check if initial setup is needed
 router.get('/needs-setup', async (req, res) => {
@@ -96,6 +146,7 @@ router.post('/logout', async (req, res) => {
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
 
   if (userId) {
+    activeOnlineUsers.delete(userId.toString());
     await logActivity(userId, username, 'LOGOUT', `User ${username} logged out`, ip);
   }
 

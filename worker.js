@@ -156,6 +156,15 @@ async function ensureTables(db) {
           expires INTEGER NOT NULL,
           data TEXT
         );
+      `),
+      db.prepare(`
+        CREATE TABLE IF NOT EXISTS online_presence (
+          userId INTEGER PRIMARY KEY,
+          username TEXT NOT NULL,
+          displayName TEXT DEFAULT '',
+          role TEXT DEFAULT 'admin',
+          lastSeen INTEGER NOT NULL
+        );
       `)
     ]);
 
@@ -271,6 +280,34 @@ async function handleApi(request, env, url) {
     // -------------------------------------------------------------
     // AUTH ROUTES
     // -------------------------------------------------------------
+    if (session?.userId) {
+      const nowUnix = Math.floor(Date.now() / 1000);
+      await db.prepare("INSERT OR REPLACE INTO online_presence (userId, username, displayName, role, lastSeen) VALUES (?, ?, ?, ?, ?)")
+        .bind(session.userId, session.username, session.displayName || session.username, session.role || 'admin', nowUnix)
+        .run();
+    }
+
+    if (url.pathname === '/api/auth/heartbeat' && request.method === 'POST') {
+      if (!session?.userId) {
+        return new Response(JSON.stringify({ error: 'Authentication required' }), { status: 401, headers: resHeaders });
+      }
+      const nowUnix = Math.floor(Date.now() / 1000);
+      await db.prepare("INSERT OR REPLACE INTO online_presence (userId, username, displayName, role, lastSeen) VALUES (?, ?, ?, ?, ?)")
+        .bind(session.userId, session.username, session.displayName || session.username, session.role || 'admin', nowUnix)
+        .run();
+
+      const threshold = nowUnix - 45;
+      const { results } = await db.prepare("SELECT userId as id, username, displayName, role FROM online_presence WHERE lastSeen >= ?").bind(threshold).all();
+      return new Response(JSON.stringify({ onlineUsers: results || [] }), { headers: resHeaders });
+    }
+
+    if (url.pathname === '/api/auth/online') {
+      const nowUnix = Math.floor(Date.now() / 1000);
+      const threshold = nowUnix - 45;
+      const { results } = await db.prepare("SELECT userId as id, username, displayName, role FROM online_presence WHERE lastSeen >= ?").bind(threshold).all();
+      return new Response(JSON.stringify({ onlineUsers: results || [] }), { headers: resHeaders });
+    }
+
     if (url.pathname === '/api/auth/needs-setup') {
       const userCount = await db.prepare("SELECT COUNT(*) as c FROM users").first('c');
       return new Response(JSON.stringify({ needsSetup: userCount === 0 }), { headers: resHeaders });

@@ -47,6 +47,8 @@
     login: (d) => api.request('/api/auth/login', { method: 'POST', body: JSON.stringify(d) }),
     logout: () => api.request('/api/auth/logout', { method: 'POST' }),
     me: () => api.request('/api/auth/me'),
+    heartbeat: () => api.request('/api/auth/heartbeat', { method: 'POST' }),
+    getOnline: () => api.request('/api/auth/online'),
     getUsers: () => api.request('/api/auth/users'),
     createUser: (d) => api.request('/api/auth/users', { method: 'POST', body: JSON.stringify(d) }),
     deleteUser: (id) => api.request(`/api/auth/users/${id}`, { method: 'DELETE' }),
@@ -121,12 +123,99 @@
     }, 3000);
   }
 
-  // ---- CLOCK ----
+  // ---- CLOCK & PRESENCE ----
+  const AVATAR_GRADIENTS = [
+    'linear-gradient(135deg, #f59e0b, #ec4899)', // Orange -> Pink (A)
+    'linear-gradient(135deg, #8b5cf6, #3b82f6)', // Purple -> Blue (L)
+    'linear-gradient(135deg, #6366f1, #06b6d4)', // Indigo -> Teal (T)
+    'linear-gradient(135deg, #10b981, #06b6d4)', // Emerald -> Cyan
+    'linear-gradient(135deg, #f43f5e, #fb923c)', // Rose -> Orange
+    'linear-gradient(135deg, #a855f7, #ec4899)'  // Violet -> Pink
+  ];
+
+  function getAvatarGradient(str) {
+    if (!str) return AVATAR_GRADIENTS[0];
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const index = Math.abs(hash) % AVATAR_GRADIENTS.length;
+    return AVATAR_GRADIENTS[index];
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   function updateClock() {
     const now = new Date();
     const time = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
     const el = $('#live-clock');
     if (el) el.textContent = time;
+  }
+
+  let presenceInterval = null;
+
+  async function updateOnlinePresence() {
+    if (!state.user) return;
+    try {
+      const data = await api.heartbeat();
+      renderOnlineUsers(data.onlineUsers || []);
+    } catch {
+      // Fallback to showing logged in user
+      if (state.user) {
+        renderOnlineUsers([state.user]);
+      }
+    }
+  }
+
+  function renderOnlineUsers(users) {
+    const container = $('#online-avatars');
+    if (!container) return;
+
+    if (!users || users.length === 0) {
+      if (state.user) users = [state.user];
+      else {
+        container.innerHTML = '';
+        return;
+      }
+    }
+
+    // Deduplicate users
+    const seen = new Set();
+    const uniqueUsers = [];
+    users.forEach(u => {
+      const key = (u.id || u.username || '').toString();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        uniqueUsers.push(u);
+      }
+    });
+
+    const maxDisplay = 4;
+    const displayList = uniqueUsers.slice(0, maxDisplay);
+    const overflow = uniqueUsers.length - maxDisplay;
+
+    container.innerHTML = displayList.map(u => {
+      const name = u.displayName || u.username || 'User';
+      const initial = name.charAt(0).toUpperCase();
+      const gradient = getAvatarGradient(u.username || name);
+      const isMe = state.user && (state.user.id === u.id || state.user.username === u.username);
+      const tooltip = `${name} (${u.role === 'admin' ? 'Admin' : 'Staff'})${isMe ? ' • (You)' : ' • Online'}`;
+
+      return `
+        <div class="online-avatar-bubble" style="background: ${gradient};" data-tooltip="${escapeHtml(tooltip)}">
+          ${initial}
+          <span class="online-status-dot"></span>
+        </div>
+      `;
+    }).join('') + (overflow > 0 ? `<span class="online-overflow-badge">+${overflow}</span>` : '');
   }
 
   // ---- AUTH ----
@@ -179,6 +268,11 @@
         el.classList.toggle('hidden', !isAdmin);
       });
     }
+
+    // Start online presence tracking
+    if (presenceInterval) clearInterval(presenceInterval);
+    updateOnlinePresence();
+    presenceInterval = setInterval(updateOnlinePresence, 10000);
 
     // Load initial view
     navigateTo('dashboard');
@@ -1316,6 +1410,12 @@
     $('#logout-btn').addEventListener('click', async () => {
       try {
         await api.logout();
+        if (presenceInterval) {
+          clearInterval(presenceInterval);
+          presenceInterval = null;
+        }
+        const avatars = $('#online-avatars');
+        if (avatars) avatars.innerHTML = '';
         state.user = null;
         showLogin(false);
         showToast('Logged out', 'info');
