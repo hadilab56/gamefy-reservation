@@ -8,6 +8,7 @@ require('dotenv').config();
 const { initDatabase, getPool, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } = require('./db');
 const { router: authRouter } = require('./routes/auth');
 const reservationRouter = require('./routes/reservations');
+const logsRouter = require('./routes/logs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -59,6 +60,7 @@ async function startServer() {
   // API routes
   app.use('/api/auth', authRouter);
   app.use('/api/reservations', reservationRouter);
+  app.use('/api/logs', logsRouter);
 
   // Catch-all: serve the SPA
   app.get('*', (req, res) => {

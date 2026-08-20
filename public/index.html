@@ -112,6 +112,17 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
           <span>Calendar</span>
         </a>
+
+        <!-- Admin Only Navigation Links -->
+        <div class="sidebar-section-divider admin-only" id="admin-nav-divider"><span>ADMINISTRATION</span></div>
+        <a href="#" class="nav-item admin-only" data-view="users" id="nav-users">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+          <span>Team & Users</span>
+        </a>
+        <a href="#" class="nav-item admin-only" data-view="logs" id="nav-logs">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          <span>Activity Logs</span>
+        </a>
       </nav>
 
       <div class="sidebar-footer">
@@ -330,7 +341,186 @@
           <div class="card-body agenda-card-body" id="cal-detail-body"></div>
         </div>
       </div>
+
+      <!-- Team & Users Management View (Admin Only) -->
+      <div id="view-users" class="view">
+        <div class="users-view-header">
+          <div class="users-header-info">
+            <h3>Team & User Access</h3>
+            <p class="text-muted">Create staff logins and manage administrative permissions</p>
+          </div>
+          <button class="btn btn-primary" id="new-user-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+            <span>+ Add New User</span>
+          </button>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table" id="users-table">
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Username</th>
+                <th>Role & Permissions</th>
+                <th>Created Date</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="users-tbody">
+              <!-- Rendered dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Activity Logs View (Admin Only) -->
+      <div id="view-logs" class="view">
+        <div class="logs-header-bar">
+          <div class="logs-header-left">
+            <h3>Activity Logs & Audit Trail</h3>
+            <span class="badge badge-purple" id="logs-total-count">0 logs</span>
+          </div>
+          <div class="logs-header-right">
+            <button class="btn btn-outline btn-sm" id="logs-refresh-btn" title="Refresh Logs">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+              <span>Refresh</span>
+            </button>
+            <button class="btn btn-outline btn-sm btn-danger-outline" id="logs-clear-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+              <span>Clear Logs</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Logs Filter Bar -->
+        <div class="filters-bar logs-filters-bar">
+          <div class="search-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input type="text" id="logs-search" placeholder="Search by user, action, reservation, or IP...">
+          </div>
+          <div class="filter-group">
+            <select id="logs-action-filter" class="filter-input">
+              <option value="all">All Actions</option>
+              <option value="LOGIN">Logins & Logouts</option>
+              <option value="CREATE_RESERVATION">Created Reservations</option>
+              <option value="UPDATE_RESERVATION">Updated Reservations</option>
+              <option value="DELETE_RESERVATION">Deleted Reservations</option>
+              <option value="STATUS_CHANGE">Status Changes</option>
+              <option value="CREATE_USER">User Creations</option>
+              <option value="DELETE_USER">User Deletions</option>
+            </select>
+            <input type="date" id="logs-start-date" class="filter-input" title="Start Date">
+            <input type="date" id="logs-end-date" class="filter-input" title="End Date">
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table logs-table" id="logs-table">
+            <thead>
+              <tr>
+                <th style="width: 170px;">Timestamp</th>
+                <th style="width: 160px;">Operator / User</th>
+                <th style="width: 180px;">Action</th>
+                <th>Activity Description</th>
+                <th style="width: 140px;">IP Address</th>
+              </tr>
+            </thead>
+            <tbody id="logs-tbody">
+              <!-- Rendered dynamically -->
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination" id="logs-pagination"></div>
+      </div>
     </main>
+  </div>
+
+  <!-- User Creation Modal (Admin Only) -->
+  <div id="user-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content modal-sm">
+      <div class="modal-header">
+        <h3 id="user-modal-title">Create User Account</h3>
+        <button class="btn-icon" id="user-modal-close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <form id="user-form" class="modal-body">
+        <div class="input-group">
+          <label for="user-username">Username *</label>
+          <input type="text" id="user-username" placeholder="e.g., operator1, staff_ahmed" required autocomplete="off">
+        </div>
+        <div class="input-group">
+          <label for="user-display">Display Name</label>
+          <input type="text" id="user-display" placeholder="e.g., Ahmed Ben Ali">
+        </div>
+        <div class="input-group">
+          <label for="user-password">Password *</label>
+          <input type="password" id="user-password" placeholder="Enter secure password" required autocomplete="new-password">
+        </div>
+        <div class="input-group">
+          <label for="user-role-select">Role & Permissions</label>
+          <select id="user-role-select">
+            <option value="staff">Staff (Reservations, Stations & Calendar)</option>
+            <option value="admin">Administrator (Full Access & Activity Logs)</option>
+          </select>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="user-modal-cancel">Cancel</button>
+        <button class="btn btn-primary" id="user-modal-save">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="8.5" cy="7" r="4"/></svg>
+          <span>Create Account</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- User Delete Confirmation Modal -->
+  <div id="user-delete-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content modal-sm">
+      <div class="modal-header">
+        <h3>Delete User Account</h3>
+        <button class="btn-icon" id="user-delete-modal-close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p>Are you sure you want to delete account <strong id="user-delete-name"></strong>?</p>
+        <p class="text-muted">This user will lose access to the system immediately.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="user-delete-cancel">Cancel</button>
+        <button class="btn btn-danger" id="user-delete-confirm">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+          <span>Delete Account</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Clear Logs Confirmation Modal -->
+  <div id="clear-logs-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content modal-sm">
+      <div class="modal-header">
+        <h3>Clear Activity Logs</h3>
+        <button class="btn-icon" id="clear-logs-modal-close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p>Are you sure you want to permanently clear all activity audit logs?</p>
+        <p class="text-muted">This will remove all logged historical events.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="clear-logs-cancel">Cancel</button>
+        <button class="btn btn-danger" id="clear-logs-confirm">
+          <span>Clear All Logs</span>
+        </button>
+      </div>
+    </div>
   </div>
 
   <!-- Reservation Modal -->

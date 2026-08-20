@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS `reservations` (
   `leavingTime` VARCHAR(10) DEFAULT '',
   `duration` VARCHAR(50) DEFAULT '',
   `stations` LONGTEXT DEFAULT NULL,
-  `stationType` ENUM('pc', 'vip') DEFAULT 'pc',
+  `stationType` ENUM('pc', 'vip', 'ps5') DEFAULT 'pc',
   `notes` TEXT DEFAULT NULL,
   `status` ENUM('pending', 'confirmed', 'active', 'done', 'cancelled') DEFAULT 'pending',
   `createdAt` DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -46,3 +46,17 @@ CREATE TABLE IF NOT EXISTS `sessions` (
   `data` MEDIUMTEXT COLLATE utf8mb4_bin,
   PRIMARY KEY (`session_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+-- 4. Activity Logs Table (Audit Trail for Admin)
+CREATE TABLE IF NOT EXISTS `activity_logs` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `userId` INT DEFAULT NULL,
+  `username` VARCHAR(50) NOT NULL,
+  `action` VARCHAR(50) NOT NULL,
+  `details` TEXT DEFAULT NULL,
+  `ipAddress` VARCHAR(50) DEFAULT '',
+  `createdAt` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_action` (`action`),
+  INDEX `idx_username` (`username`),
+  INDEX `idx_createdAt` (`createdAt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

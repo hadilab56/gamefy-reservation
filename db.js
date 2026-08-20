@@ -86,6 +86,33 @@ function formatUser(row) {
   };
 }
 
+// Convert log row
+function formatLog(row) {
+  if (!row) return null;
+  return {
+    _id: row.id.toString(),
+    id: row.id,
+    userId: row.userId,
+    username: row.username,
+    action: row.action,
+    details: row.details || '',
+    ipAddress: row.ipAddress || '',
+    createdAt: row.createdAt
+  };
+}
+
+// Log activity helper
+async function logActivity(userId, username, action, details = '', ipAddress = '') {
+  try {
+    await query(
+      `INSERT INTO activity_logs (userId, username, action, details, ipAddress) VALUES (?, ?, ?, ?, ?)`,
+      [userId || null, username || 'System', action, details, ipAddress]
+    );
+  } catch (err) {
+    console.error('Failed to write activity log:', err.message);
+  }
+}
+
 async function initDatabase() {
   try {
     // 1. Connect without database to ensure database exists
@@ -126,7 +153,7 @@ async function initDatabase() {
         \`leavingTime\` VARCHAR(10) DEFAULT '',
         \`duration\` VARCHAR(50) DEFAULT '',
         \`stations\` LONGTEXT DEFAULT NULL,
-        \`stationType\` ENUM('pc', 'vip') DEFAULT 'pc',
+        \`stationType\` ENUM('pc', 'vip', 'ps5') DEFAULT 'pc',
         \`notes\` TEXT DEFAULT NULL,
         \`status\` ENUM('pending', 'confirmed', 'active', 'done', 'cancelled') DEFAULT 'pending',
         \`createdAt\` DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -145,6 +172,22 @@ async function initDatabase() {
         \`data\` MEDIUMTEXT COLLATE utf8mb4_bin,
         PRIMARY KEY (\`session_id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+    `);
+
+    // Activity Logs table
+    await p.query(`
+      CREATE TABLE IF NOT EXISTS \`activity_logs\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`userId\` INT DEFAULT NULL,
+        \`username\` VARCHAR(50) NOT NULL,
+        \`action\` VARCHAR(50) NOT NULL,
+        \`details\` TEXT DEFAULT NULL,
+        \`ipAddress\` VARCHAR(50) DEFAULT '',
+        \`createdAt\` DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX \`idx_action\` (\`action\`),
+        INDEX \`idx_username\` (\`username\`),
+        INDEX \`idx_createdAt\` (\`createdAt\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
     // Check if default admin account exists, if not create one
@@ -171,6 +214,8 @@ module.exports = {
   initDatabase,
   formatReservation,
   formatUser,
+  formatLog,
+  logActivity,
   DB_HOST,
   DB_PORT,
   DB_USER,

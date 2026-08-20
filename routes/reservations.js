@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { query, formatReservation } = require('../db');
+const { query, formatReservation, logActivity } = require('../db');
 const { requireAuth } = require('./auth');
 
 // All stations
@@ -223,7 +223,8 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Name, date, and arrival time are required' });
     }
 
-    const stationsJson = JSON.stringify(Array.isArray(stations) ? stations : []);
+    const stationsArr = Array.isArray(stations) ? stations : [];
+    const stationsJson = JSON.stringify(stationsArr);
     const dateStr = date.split('T')[0];
 
     const result = await query(
@@ -237,14 +238,25 @@ router.post('/', requireAuth, async (req, res) => {
         leavingTime ? leavingTime.trim() : '',
         duration ? duration.trim() : '',
         stationsJson,
-        stationType || (stationsJson.includes('VIP Room') ? 'vip' : 'pc'),
+        stationType || (stationsJson.includes('VIP Room') ? 'vip' : (stationsArr.some(s => s.startsWith('PS5')) ? 'ps5' : 'pc')),
         notes ? notes.trim() : '',
         status || 'pending'
       ]
     );
 
     const [newRow] = await query('SELECT * FROM reservations WHERE id = ?', [result.insertId]);
-    res.status(201).json({ reservation: formatReservation(newRow) });
+    const reservation = formatReservation(newRow);
+
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+    await logActivity(
+      req.session.userId,
+      req.session.username,
+      'CREATE_RESERVATION',
+      `Created reservation for "${reservation.name}" on ${dateStr} at ${arrivalTime} (Stations: ${stationsArr.join(', ') || 'None'})`,
+      ip
+    );
+
+    res.status(201).json({ reservation });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -287,7 +299,18 @@ router.put('/:id', requireAuth, async (req, res) => {
     await query(`UPDATE reservations SET ${fields.join(', ')} WHERE id = ?`, params);
 
     const [updatedRow] = await query('SELECT * FROM reservations WHERE id = ?', [id]);
-    res.json({ reservation: formatReservation(updatedRow) });
+    const updated = formatReservation(updatedRow);
+
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+    const isStatusOnly = Object.keys(req.body).length === 1 && req.body.status;
+    const action = isStatusOnly ? 'STATUS_CHANGE' : 'UPDATE_RESERVATION';
+    const detailMsg = isStatusOnly 
+      ? `Changed status for "${updated.name}" from "${existing.status}" to "${updated.status}"`
+      : `Updated reservation for "${updated.name}" (Date: ${updated.date}, Time: ${updated.arrivalTime})`;
+
+    await logActivity(req.session.userId, req.session.username, action, detailMsg, ip);
+
+    res.json({ reservation: updated });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -303,6 +326,16 @@ router.delete('/:id', requireAuth, async (req, res) => {
     }
 
     await query('DELETE FROM reservations WHERE id = ?', [id]);
+
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+    await logActivity(
+      req.session.userId,
+      req.session.username,
+      'DELETE_RESERVATION',
+      `Deleted reservation for "${existing.name}" (Date: ${existing.date ? existing.date.toISOString().split('T')[0] : ''}, Time: ${existing.arrivalTime})`,
+      ip
+    );
+
     res.json({ message: 'Reservation deleted' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -316,6 +349,10 @@ router.delete('/all/reset', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Admin access required' });
     }
     await query('TRUNCATE TABLE reservations');
+
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+    await logActivity(req.session.userId, req.session.username, 'RESET_DATABASE', 'Admin cleared all reservations from database', ip);
+
     res.json({ message: 'All reservations deleted' });
   } catch (err) {
     res.status(500).json({ error: err.message });

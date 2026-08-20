@@ -18,7 +18,14 @@
     currentPage: 1,
     editingId: null,
     deletingId: null,
-    deletingName: ''
+    deletingName: '',
+    logsPage: 1,
+    logsAction: 'all',
+    logsSearch: '',
+    logsStartDate: '',
+    logsEndDate: '',
+    deletingUserId: null,
+    deletingUsername: ''
   };
 
   // ---- API CLIENT ----
@@ -34,12 +41,15 @@
       return data;
     },
 
-    // Auth
+    // Auth & Users
     needsSetup: () => api.request('/api/auth/needs-setup'),
     setup: (d) => api.request('/api/auth/setup', { method: 'POST', body: JSON.stringify(d) }),
     login: (d) => api.request('/api/auth/login', { method: 'POST', body: JSON.stringify(d) }),
     logout: () => api.request('/api/auth/logout', { method: 'POST' }),
     me: () => api.request('/api/auth/me'),
+    getUsers: () => api.request('/api/auth/users'),
+    createUser: (d) => api.request('/api/auth/users', { method: 'POST', body: JSON.stringify(d) }),
+    deleteUser: (id) => api.request(`/api/auth/users/${id}`, { method: 'DELETE' }),
 
     // Reservations
     getReservations: (params) => {
@@ -51,7 +61,14 @@
     getStations: (date) => api.request(`/api/reservations/stations?date=${date}`),
     createReservation: (d) => api.request('/api/reservations', { method: 'POST', body: JSON.stringify(d) }),
     updateReservation: (id, d) => api.request(`/api/reservations/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
-    deleteReservation: (id) => api.request(`/api/reservations/${id}`, { method: 'DELETE' })
+    deleteReservation: (id) => api.request(`/api/reservations/${id}`, { method: 'DELETE' }),
+
+    // Activity Logs
+    getLogs: (params) => {
+      const qs = new URLSearchParams(params).toString();
+      return api.request(`/api/logs?${qs}`);
+    },
+    clearLogs: () => api.request('/api/logs/clear', { method: 'DELETE' })
   };
 
   // ---- UTILITY ----
@@ -150,12 +167,17 @@
     $('#login-page').classList.remove('active');
     $('#app-page').classList.add('active');
 
-    // Update user info
+    // Update user info & permissions
     if (state.user) {
       const name = state.user.displayName || state.user.username;
       $('#user-name').textContent = name;
       $('#user-role').textContent = state.user.role === 'admin' ? 'Administrator' : 'Staff';
       $('#user-avatar').textContent = name.charAt(0).toUpperCase();
+
+      const isAdmin = state.user.role === 'admin';
+      $$('.admin-only').forEach(el => {
+        el.classList.toggle('hidden', !isAdmin);
+      });
     }
 
     // Load initial view
@@ -164,6 +186,12 @@
 
   // ---- NAVIGATION ----
   function navigateTo(view) {
+    // Role protection
+    if ((view === 'users' || view === 'logs') && (!state.user || state.user.role !== 'admin')) {
+      showToast('Admin access required', 'error');
+      view = 'dashboard';
+    }
+
     state.currentView = view;
 
     // Update nav
@@ -181,7 +209,9 @@
       dashboard: 'Dashboard',
       reservations: 'Reservations',
       stations: 'Station Map',
-      calendar: 'Calendar'
+      calendar: 'Calendar',
+      users: 'Team & User Access',
+      logs: 'Activity Logs & Audit Trail'
     };
     $('#page-title').textContent = titles[view] || 'Dashboard';
 
@@ -191,6 +221,8 @@
       case 'reservations': loadReservations(); break;
       case 'stations': loadStations(); break;
       case 'calendar': loadCalendar(); break;
+      case 'users': loadUsers(); break;
+      case 'logs': loadLogs(); break;
     }
 
     // Close mobile sidebar
@@ -1016,6 +1048,219 @@
       case 'reservations': loadReservations(); break;
       case 'stations': loadStations(); break;
       case 'calendar': loadCalendar(); break;
+      case 'users': loadUsers(); break;
+      case 'logs': loadLogs(); break;
+    }
+  }
+
+  // ---- TEAM & USERS MANAGEMENT (Admin Only) ----
+  async function loadUsers() {
+    try {
+      const { users } = await api.getUsers();
+      renderUsersTable(users);
+    } catch (err) {
+      console.error('Users error:', err);
+      showToast(err.message, 'error');
+    }
+  }
+
+  function renderUsersTable(users) {
+    const tbody = $('#users-tbody');
+    if (!users || !users.length) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-muted)">No users found</td></tr>`;
+      return;
+    }
+
+    const currentUserId = state.user ? (state.user._id || state.user.id) : null;
+
+    tbody.innerHTML = users.map(u => {
+      const uId = u._id || u.id;
+      const isSelf = currentUserId && (uId.toString() === currentUserId.toString());
+      const roleBadge = u.role === 'admin' 
+        ? '<span class="role-badge role-admin">👑 Administrator</span>' 
+        : '<span class="role-badge role-staff">👤 Staff Member</span>';
+
+      const initial = (u.displayName || u.username || 'U').charAt(0).toUpperCase();
+
+      return `
+        <tr>
+          <td>
+            <div class="log-user-badge">
+              <div class="log-user-avatar" style="${u.role === 'admin' ? 'background:linear-gradient(135deg, var(--amber-500), var(--purple-500))' : ''}">${initial}</div>
+              <span>${escapeHtml(u.displayName || u.username)}</span>
+            </div>
+          </td>
+          <td><code style="color:var(--cyan-300);font-weight:600">${escapeHtml(u.username)}</code></td>
+          <td>${roleBadge}</td>
+          <td><span class="text-secondary" style="font-size:0.82rem">${formatDate(u.createdAt)}</span></td>
+          <td>
+            <div class="td-actions">
+              ${isSelf 
+                ? '<span class="text-muted" style="font-size:0.75rem;font-style:italic">Current Account</span>' 
+                : `<button class="btn-icon btn-delete" onclick="window.app.deleteUser('${uId}', '${escapeHtml(u.username)}')" title="Delete User">
+                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                   </button>`
+              }
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function openUserModal() {
+    $('#user-form').reset();
+    $('#user-modal').classList.add('open');
+    setTimeout(() => $('#user-username').focus(), 100);
+  }
+
+  function closeUserModal() {
+    $('#user-modal').classList.remove('open');
+  }
+
+  async function saveUser(e) {
+    if (e) e.preventDefault();
+    const username = $('#user-username').value.trim();
+    const displayName = $('#user-display').value.trim();
+    const password = $('#user-password').value;
+    const role = $('#user-role-select').value;
+
+    if (!username || !password) {
+      showToast('Username and password are required', 'error');
+      return;
+    }
+
+    try {
+      await api.createUser({ username, displayName, password, role });
+      showToast(`User account "${username}" created successfully!`);
+      closeUserModal();
+      loadUsers();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  function openUserDeleteModal(id, username) {
+    state.deletingUserId = id;
+    state.deletingUsername = username;
+    $('#user-delete-name').textContent = username;
+    $('#user-delete-modal').classList.add('open');
+  }
+
+  function closeUserDeleteModal() {
+    $('#user-delete-modal').classList.remove('open');
+    state.deletingUserId = null;
+    state.deletingUsername = '';
+  }
+
+  async function confirmDeleteUser() {
+    if (!state.deletingUserId) return;
+    try {
+      await api.deleteUser(state.deletingUserId);
+      showToast(`Account "${state.deletingUsername}" deleted`);
+      closeUserDeleteModal();
+      loadUsers();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  // ---- ACTIVITY LOGS (Admin Only) ----
+  async function loadLogs() {
+    try {
+      const params = {
+        page: state.logsPage,
+        limit: 30
+      };
+      if (state.logsAction && state.logsAction !== 'all') params.action = state.logsAction;
+      if (state.logsSearch) params.search = state.logsSearch;
+      if (state.logsStartDate && state.logsEndDate) {
+        params.startDate = state.logsStartDate;
+        params.endDate = state.logsEndDate;
+      }
+
+      const { logs, total, page, totalPages } = await api.getLogs(params);
+      $('#logs-total-count').textContent = `${total} ${total === 1 ? 'event' : 'events'}`;
+      renderLogsTable(logs);
+      renderLogsPagination(page, totalPages);
+    } catch (err) {
+      console.error('Logs error:', err);
+      showToast(err.message, 'error');
+    }
+  }
+
+  function renderLogsTable(logs) {
+    const tbody = $('#logs-tbody');
+    if (!logs || !logs.length) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-muted)">No activity logs found</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = logs.map(l => {
+      const dateObj = new Date(l.createdAt);
+      const timeStr = dateObj.toLocaleDateString('en-GB') + ' ' + dateObj.toLocaleTimeString('en-GB');
+      const actionClass = `action-${l.action}`;
+      const actionLabel = l.action.replace(/_/g, ' ');
+      const initial = (l.username || 'U').charAt(0).toUpperCase();
+
+      return `
+        <tr>
+          <td><span class="log-timestamp">${timeStr}</span></td>
+          <td>
+            <div class="log-user-badge">
+              <div class="log-user-avatar">${initial}</div>
+              <span>${escapeHtml(l.username)}</span>
+            </div>
+          </td>
+          <td><span class="action-badge ${actionClass}">${actionLabel}</span></td>
+          <td><div class="log-details">${escapeHtml(l.details)}</div></td>
+          <td><span class="log-ip">${escapeHtml(l.ipAddress || '—')}</span></td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function renderLogsPagination(currentPage, totalPages) {
+    const container = $('#logs-pagination');
+    if (!container) return;
+    if (totalPages <= 1) {
+      container.innerHTML = '';
+      return;
+    }
+
+    let html = '';
+    if (currentPage > 1) {
+      html += `<button onclick="window.app.goToLogsPage(${currentPage - 1})">‹ Prev</button>`;
+    }
+    for (let i = 1; i <= totalPages; i++) {
+      if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
+        html += `<button class="${i === currentPage ? 'active' : ''}" onclick="window.app.goToLogsPage(${i})">${i}</button>`;
+      } else if (i === currentPage - 3 || i === currentPage + 3) {
+        html += `<button disabled style="border:none;background:transparent;cursor:default">...</button>`;
+      }
+    }
+    if (currentPage < totalPages) {
+      html += `<button onclick="window.app.goToLogsPage(${currentPage + 1})">Next ›</button>`;
+    }
+    container.innerHTML = html;
+  }
+
+  function openClearLogsModal() {
+    $('#clear-logs-modal').classList.add('open');
+  }
+
+  function closeClearLogsModal() {
+    $('#clear-logs-modal').classList.remove('open');
+  }
+
+  async function confirmClearLogs() {
+    try {
+      await api.clearLogs();
+      showToast('All activity logs have been cleared');
+      closeClearLogsModal();
+      loadLogs();
+    } catch (err) {
+      showToast(err.message, 'error');
     }
   }
 
@@ -1095,7 +1340,7 @@
     // New reservation
     $('#new-reservation-btn').addEventListener('click', () => openReservationModal());
 
-    // Modal controls
+    // Reservation Modal controls
     $('#modal-close').addEventListener('click', closeReservationModal);
     $('#modal-cancel').addEventListener('click', closeReservationModal);
     $('#reservation-modal .modal-overlay').addEventListener('click', closeReservationModal);
@@ -1110,11 +1355,59 @@
       }
     });
 
-    // Delete modal
+    // Delete reservation modal
     $('#delete-modal-close').addEventListener('click', closeDeleteModal);
     $('#delete-cancel').addEventListener('click', closeDeleteModal);
     $('#delete-modal .modal-overlay').addEventListener('click', closeDeleteModal);
     $('#delete-confirm').addEventListener('click', confirmDelete);
+
+    // User management controls (Admin Only)
+    $('#new-user-btn').addEventListener('click', openUserModal);
+    $('#user-modal-close').addEventListener('click', closeUserModal);
+    $('#user-modal-cancel').addEventListener('click', closeUserModal);
+    $('#user-modal .modal-overlay').addEventListener('click', closeUserModal);
+    $('#user-modal-save').addEventListener('click', saveUser);
+    $('#user-form').addEventListener('submit', saveUser);
+
+    $('#user-delete-modal-close').addEventListener('click', closeUserDeleteModal);
+    $('#user-delete-cancel').addEventListener('click', closeUserDeleteModal);
+    $('#user-delete-modal .modal-overlay').addEventListener('click', closeUserDeleteModal);
+    $('#user-delete-confirm').addEventListener('click', confirmDeleteUser);
+
+    // Activity logs controls (Admin Only)
+    $('#logs-refresh-btn').addEventListener('click', loadLogs);
+    $('#logs-clear-btn').addEventListener('click', openClearLogsModal);
+    $('#clear-logs-modal-close').addEventListener('click', closeClearLogsModal);
+    $('#clear-logs-cancel').addEventListener('click', closeClearLogsModal);
+    $('#clear-logs-confirm').addEventListener('click', confirmClearLogs);
+
+    let logsSearchTimeout;
+    $('#logs-search').addEventListener('input', (e) => {
+      clearTimeout(logsSearchTimeout);
+      logsSearchTimeout = setTimeout(() => {
+        state.logsSearch = e.target.value.trim();
+        state.logsPage = 1;
+        loadLogs();
+      }, 300);
+    });
+
+    $('#logs-action-filter').addEventListener('change', (e) => {
+      state.logsAction = e.target.value;
+      state.logsPage = 1;
+      loadLogs();
+    });
+
+    $('#logs-start-date').addEventListener('change', (e) => {
+      state.logsStartDate = e.target.value;
+      state.logsPage = 1;
+      loadLogs();
+    });
+
+    $('#logs-end-date').addEventListener('change', (e) => {
+      state.logsEndDate = e.target.value;
+      state.logsPage = 1;
+      loadLogs();
+    });
 
     // Filters
     let searchTimeout;
@@ -1198,6 +1491,9 @@
       if (e.key === 'Escape') {
         closeReservationModal();
         closeDeleteModal();
+        closeUserModal();
+        closeUserDeleteModal();
+        closeClearLogsModal();
       }
       // Ctrl/Cmd + N for new reservation
       if ((e.ctrlKey || e.metaKey) && e.key === 'n' && state.user) {
@@ -1212,9 +1508,14 @@
     cycleStatus,
     editReservation,
     confirmDelete: openDeleteModal,
+    deleteUser: openUserDeleteModal,
     goToPage: (page) => {
       state.currentPage = page;
       loadReservations();
+    },
+    goToLogsPage: (page) => {
+      state.logsPage = page;
+      loadLogs();
     },
     showCalDay: showCalendarDay,
     highlightAgendaCard
