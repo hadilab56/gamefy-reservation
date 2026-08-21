@@ -359,6 +359,59 @@ router.delete('/all/reset', requireAuth, async (req, res) => {
   }
 });
 
+// Import reservations from CSV (bulk insert)
+router.post('/import', requireAuth, async (req, res) => {
+  try {
+    const { reservations } = req.body;
+    if (!Array.isArray(reservations) || reservations.length === 0) {
+      return res.status(400).json({ error: 'No reservations provided for import' });
+    }
+
+    let insertedCount = 0;
+    for (const r of reservations) {
+      if (!r.name || !r.date || !r.arrivalTime) continue;
+
+      const stationsArr = Array.isArray(r.stations)
+        ? r.stations
+        : (typeof r.stations === 'string' && r.stations ? r.stations.split(',').map(s => s.trim()).filter(Boolean) : []);
+      const stationsJson = JSON.stringify(stationsArr);
+      const dateStr = (r.date || '').split('T')[0];
+      const stationType = r.stationType || (stationsJson.includes('VIP Room') ? 'vip' : (stationsArr.some(s => s.startsWith('PS5')) ? 'ps5' : 'pc'));
+
+      await query(
+        `INSERT INTO reservations (name, phone, date, arrivalTime, leavingTime, duration, stations, stationType, notes, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          (r.name || '').trim(),
+          r.phone ? (r.phone + '').trim() : '',
+          dateStr,
+          (r.arrivalTime || '').trim(),
+          r.leavingTime ? (r.leavingTime + '').trim() : '',
+          r.duration ? (r.duration + '').trim() : '',
+          stationsJson,
+          stationType,
+          r.notes ? (r.notes + '').trim() : '',
+          r.status || 'pending'
+        ]
+      );
+      insertedCount++;
+    }
+
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+    await logActivity(
+      req.session.userId,
+      req.session.username,
+      'IMPORT_RESERVATIONS',
+      `Imported ${insertedCount} reservations from CSV`,
+      ip
+    );
+
+    res.json({ message: `Successfully imported ${insertedCount} reservations`, count: insertedCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Export reservations as CSV
 router.get('/export', requireAuth, async (req, res) => {
   try {

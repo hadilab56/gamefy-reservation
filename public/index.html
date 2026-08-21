@@ -255,6 +255,11 @@
               <option value="done">Done</option>
               <option value="cancelled">Cancelled</option>
             </select>
+            <button class="btn btn-outline" id="import-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <span>Import CSV</span>
+            </button>
+            <input type="file" id="import-csv-file" accept=".csv,text/csv" style="display:none">
             <button class="btn btn-outline" id="export-btn">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               <span>Export CSV</span>
@@ -525,6 +530,50 @@
         <button class="btn btn-outline" id="clear-logs-cancel">Cancel</button>
         <button class="btn btn-danger" id="clear-logs-confirm">
           <span>Clear All Logs</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import CSV Modal -->
+  <div id="import-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <h3>Import Reservations from CSV</h3>
+        <button class="btn-icon" id="import-modal-close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="import-summary-banner" id="import-summary-banner">
+          <p id="import-summary-text"></p>
+        </div>
+        <div class="table-container" style="max-height: 300px; overflow-y: auto; margin-top: 14px;">
+          <table class="data-table" id="import-preview-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>Date</th>
+                <th>Arrival</th>
+                <th>Leaving</th>
+                <th>Duration</th>
+                <th>Stations</th>
+                <th>Status</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody id="import-preview-tbody"></tbody>
+          </table>
+        </div>
+        <p class="text-muted" style="margin-top: 10px; font-size: 0.82rem;" id="import-warning-text"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="import-cancel-btn">Cancel</button>
+        <button class="btn btn-primary" id="import-confirm-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20,6 9,17 4,12"/></svg>
+          <span id="import-confirm-text">Confirm Import</span>
         </button>
       </div>
     </div>

@@ -25,7 +25,8 @@
     logsStartDate: '',
     logsEndDate: '',
     deletingUserId: null,
-    deletingUsername: ''
+    deletingUsername: '',
+    importReservationsList: []
   };
 
   // ---- API CLIENT ----
@@ -62,6 +63,7 @@
     getCalendar: (month, year) => api.request(`/api/reservations/calendar?month=${month}&year=${year}`),
     getStations: (date) => api.request(`/api/reservations/stations?date=${date}`),
     createReservation: (d) => api.request('/api/reservations', { method: 'POST', body: JSON.stringify(d) }),
+    importReservations: (d) => api.request('/api/reservations/import', { method: 'POST', body: JSON.stringify(d) }),
     updateReservation: (id, d) => api.request(`/api/reservations/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
     deleteReservation: (id) => api.request(`/api/reservations/${id}`, { method: 'DELETE' }),
 
@@ -1125,7 +1127,7 @@
     }
   }
 
-  // ---- EXPORT ----
+  // ---- EXPORT & IMPORT ----
   function exportCSV() {
     const params = new URLSearchParams();
     if (state.filterDate) params.set('date', state.filterDate);
@@ -1133,6 +1135,233 @@
 
     const url = `/api/reservations/export?${params.toString()}`;
     window.open(url, '_blank');
+  }
+
+  // Parse CSV text respecting quotes, newlines, and escapes
+  function parseCSV(text) {
+    const lines = [];
+    let currentRow = [];
+    let currentCell = '';
+    let insideQuotes = false;
+
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      const nextChar = text[i + 1];
+
+      if (char === '"') {
+        if (insideQuotes && nextChar === '"') {
+          currentCell += '"';
+          i++; // skip escaped quote
+        } else {
+          insideQuotes = !insideQuotes;
+        }
+      } else if (char === ',' && !insideQuotes) {
+        currentRow.push(currentCell.trim());
+        currentCell = '';
+      } else if ((char === '\r' || char === '\n') && !insideQuotes) {
+        if (char === '\r' && nextChar === '\n') {
+          i++;
+        }
+        currentRow.push(currentCell.trim());
+        if (currentRow.length > 1 || (currentRow.length === 1 && currentRow[0] !== '')) {
+          lines.push(currentRow);
+        }
+        currentRow = [];
+        currentCell = '';
+      } else {
+        currentCell += char;
+      }
+    }
+
+    if (currentCell.length > 0 || currentRow.length > 0) {
+      currentRow.push(currentCell.trim());
+      if (currentRow.length > 1 || (currentRow.length === 1 && currentRow[0] !== '')) {
+        lines.push(currentRow);
+      }
+    }
+
+    return lines;
+  }
+
+  function parseCSVDate(dateStr) {
+    if (!dateStr) return '';
+    dateStr = dateStr.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+    const dmyMatch = dateStr.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+    if (dmyMatch) {
+      const d = dmyMatch[1].padStart(2, '0');
+      const m = dmyMatch[2].padStart(2, '0');
+      const y = dmyMatch[3];
+      return `${y}-${m}-${d}`;
+    }
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      return formatDateISO(d);
+    }
+    return dateStr;
+  }
+
+  function parseCSVTime(timeStr) {
+    if (!timeStr) return '';
+    let cleaned = timeStr.trim().toLowerCase();
+    cleaned = cleaned.replace('h', ':00');
+    const match = cleaned.match(/^(\d{1,2}):(\d{2})/);
+    if (match) {
+      return `${match[1].padStart(2, '0')}:${match[2]}`;
+    }
+    return toTimeInput(timeStr);
+  }
+
+  function processCSVReservations(rawRows) {
+    if (!rawRows || rawRows.length < 2) return { valid: [], skipped: 0 };
+
+    const headers = rawRows[0].map(h => h.toLowerCase().trim().replace(/[\s_-]+/g, ''));
+    const findIndex = (keys) => headers.findIndex(h => keys.some(k => h === k || h.includes(k)));
+
+    const nameIdx = findIndex(['name', 'customer', 'client', 'nom']);
+    const phoneIdx = findIndex(['phone', 'tel', 'mobile', 'telephone']);
+    const dateIdx = findIndex(['date', 'day', 'jour']);
+    const arrivalIdx = findIndex(['arrivaltime', 'arrival', 'time', 'heurearrivee', 'start', 'starttime']);
+    const leavingIdx = findIndex(['leavingtime', 'leaving', 'departure', 'heuredepart', 'end', 'endtime']);
+    const durationIdx = findIndex(['duration', 'duree', 'temps']);
+    const stationsIdx = findIndex(['stations', 'station', 'postes', 'poste', 'pc']);
+    const statusIdx = findIndex(['status', 'statut', 'etat']);
+    const notesIdx = findIndex(['notes', 'note', 'comments', 'commentaires']);
+
+    const valid = [];
+    let skipped = 0;
+
+    for (let i = 1; i < rawRows.length; i++) {
+      const row = rawRows[i];
+      if (!row || row.length === 0 || (row.length === 1 && !row[0])) continue;
+
+      const name = nameIdx !== -1 ? (row[nameIdx] || '') : (row[0] || '');
+      const phone = phoneIdx !== -1 ? (row[phoneIdx] || '') : (row[1] || '');
+      const rawDate = dateIdx !== -1 ? (row[dateIdx] || '') : (row[2] || '');
+      const date = parseCSVDate(rawDate);
+      const arrivalTime = parseCSVTime(arrivalIdx !== -1 ? (row[arrivalIdx] || '') : (row[3] || ''));
+      const leavingTime = parseCSVTime(leavingIdx !== -1 ? (row[leavingIdx] || '') : (row[4] || ''));
+      const duration = durationIdx !== -1 ? (row[durationIdx] || '') : (row[5] || '');
+      const rawStations = stationsIdx !== -1 ? (row[stationsIdx] || '') : (row[6] || '');
+      const rawStatus = statusIdx !== -1 ? (row[statusIdx] || '') : (row[7] || '');
+      const notes = notesIdx !== -1 ? (row[notesIdx] || '') : (row[8] || '');
+
+      if (!name.trim() || !date || !arrivalTime) {
+        skipped++;
+        continue;
+      }
+
+      const stations = rawStations 
+        ? rawStations.split(',').map(s => s.trim()).filter(Boolean)
+        : [];
+
+      let status = (rawStatus || '').toLowerCase().trim();
+      const validStatuses = ['pending', 'confirmed', 'active', 'done', 'cancelled'];
+      if (!validStatuses.includes(status)) {
+        status = 'pending';
+      }
+
+      valid.push({
+        name: name.trim(),
+        phone: phone.trim(),
+        date,
+        arrivalTime,
+        leavingTime,
+        duration: duration.trim(),
+        stations,
+        status,
+        notes: notes.trim()
+      });
+    }
+
+    return { valid, skipped };
+  }
+
+  function handleImportFileSelect(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+      try {
+        const text = evt.target.result;
+        const rows = parseCSV(text);
+        const { valid, skipped } = processCSVReservations(rows);
+
+        if (!valid.length) {
+          showToast('No valid reservations found in CSV. Please ensure columns include Name, Date, and Arrival Time.', 'error');
+          e.target.value = '';
+          return;
+        }
+
+        state.importReservationsList = valid;
+        openImportModal(file.name, valid, skipped);
+      } catch (err) {
+        console.error('Import parse error:', err);
+        showToast('Failed to parse CSV file: ' + err.message, 'error');
+      } finally {
+        e.target.value = '';
+      }
+    };
+    reader.onerror = function() {
+      showToast('Failed to read selected CSV file', 'error');
+      e.target.value = '';
+    };
+    reader.readAsText(file);
+  }
+
+  function openImportModal(fileName, validReservations, skippedCount) {
+    const banner = $('#import-summary-text');
+    banner.innerHTML = `Found <strong>${validReservations.length}</strong> reservation${validReservations.length === 1 ? '' : 's'} ready to import from <em>${escapeHtml(fileName)}</em>.${skippedCount > 0 ? ` <span style="color:var(--amber-400)">(${skippedCount} invalid or incomplete row${skippedCount === 1 ? '' : 's'} skipped)</span>` : ''}`;
+
+    const tbody = $('#import-preview-tbody');
+    tbody.innerHTML = validReservations.map(r => `
+      <tr>
+        <td><strong>${escapeHtml(r.name)}</strong></td>
+        <td>${escapeHtml(r.phone || '—')}</td>
+        <td>${formatDate(r.date)}</td>
+        <td><span class="preview-time" style="color:var(--cyan-400);font-family:'Orbitron',sans-serif">${r.arrivalTime}</span></td>
+        <td>${r.leavingTime ? `<span style="color:var(--purple-300);font-family:'Orbitron',sans-serif">${r.leavingTime}</span>` : '—'}</td>
+        <td>${escapeHtml(r.duration || '—')}</td>
+        <td>${r.stations.length ? r.stations.map(s => `<span class="station-tag station-tag-${s.includes('VIP') ? 'vip' : (s.startsWith('PS5') ? 'ps5' : 'pc')}" style="display:inline-block;padding:1px 6px;font-size:0.7rem;margin:1px;border-radius:4px;">${escapeHtml(s)}</span>`).join('') : '<span class="text-muted">None</span>'}</td>
+        <td><span class="${statusBadgeClass(r.status)}">${statusLabel(r.status)}</span></td>
+        <td><span class="text-muted" style="max-width:140px;display:inline-block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(r.notes || '—')}</span></td>
+      </tr>
+    `).join('');
+
+    $('#import-warning-text').textContent = 'Please review the reservations above before importing. Once confirmed, they will be saved to your database.';
+    $('#import-confirm-text').textContent = `Import ${validReservations.length} Reservation${validReservations.length === 1 ? '' : 's'}`;
+    $('#import-confirm-btn').disabled = false;
+    $('#import-modal').classList.add('open');
+  }
+
+  function closeImportModal() {
+    $('#import-modal').classList.remove('open');
+    state.importReservationsList = [];
+  }
+
+  async function confirmImportCSV() {
+    if (!state.importReservationsList || !state.importReservationsList.length) {
+      showToast('No reservations to import', 'error');
+      closeImportModal();
+      return;
+    }
+
+    const confirmBtn = $('#import-confirm-btn');
+    const confirmText = $('#import-confirm-text');
+    confirmBtn.disabled = true;
+    confirmText.textContent = 'Importing...';
+
+    try {
+      const res = await api.importReservations({ reservations: state.importReservationsList });
+      showToast(res.message || `Successfully imported ${state.importReservationsList.length} reservations!`);
+      closeImportModal();
+      refreshCurrentView();
+    } catch (err) {
+      showToast(err.message || 'Import failed', 'error');
+      confirmBtn.disabled = false;
+      confirmText.textContent = 'Confirm Import';
+    }
   }
 
   // ---- REFRESH ----
@@ -1532,8 +1761,13 @@
       loadReservations();
     });
 
-    // Export
+    // Export & Import
     $('#export-btn').addEventListener('click', exportCSV);
+    $('#import-btn').addEventListener('click', () => $('#import-csv-file').click());
+    $('#import-csv-file').addEventListener('change', handleImportFileSelect);
+    $('#import-modal-close').addEventListener('click', closeImportModal);
+    $('#import-cancel-btn').addEventListener('click', closeImportModal);
+    $('#import-confirm-btn').addEventListener('click', confirmImportCSV);
 
     // Station date controls
     $('#station-date').addEventListener('change', (e) => {
@@ -1594,6 +1828,7 @@
         closeUserModal();
         closeUserDeleteModal();
         closeClearLogsModal();
+        closeImportModal();
       }
       // Ctrl/Cmd + N for new reservation
       if ((e.ctrlKey || e.metaKey) && e.key === 'n' && state.user) {

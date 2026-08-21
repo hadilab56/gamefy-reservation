@@ -533,6 +533,45 @@ async function handleApi(request, env, url) {
       return new Response(JSON.stringify({ message: 'All reservations deleted' }), { headers: resHeaders });
     }
 
+    if (url.pathname === '/api/reservations/import' && request.method === 'POST') {
+      const { reservations } = await request.json();
+      if (!Array.isArray(reservations) || reservations.length === 0) {
+        return new Response(JSON.stringify({ error: 'No reservations provided for import' }), { status: 400, headers: resHeaders });
+      }
+
+      let insertedCount = 0;
+      for (const r of reservations) {
+        if (!r.name || !r.date || !r.arrivalTime) continue;
+
+        const stationsArr = Array.isArray(r.stations)
+          ? r.stations
+          : (typeof r.stations === 'string' && r.stations ? r.stations.split(',').map(s => s.trim()).filter(Boolean) : []);
+        const stationsJson = JSON.stringify(stationsArr);
+        const dateStr = (r.date || '').split('T')[0];
+        const stationType = r.stationType || (stationsJson.includes('VIP Room') ? 'vip' : (stationsArr.some(s => s.startsWith('PS5')) ? 'ps5' : 'pc'));
+
+        await db.prepare(
+          `INSERT INTO reservations (name, phone, date, arrivalTime, leavingTime, duration, stations, stationType, notes, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          (r.name || '').trim(),
+          r.phone ? (r.phone + '').trim() : '',
+          dateStr,
+          (r.arrivalTime || '').trim(),
+          r.leavingTime ? (r.leavingTime + '').trim() : '',
+          r.duration ? (r.duration + '').trim() : '',
+          stationsJson,
+          stationType,
+          r.notes ? (r.notes + '').trim() : '',
+          r.status || 'pending'
+        ).run();
+        insertedCount++;
+      }
+
+      await logActivity(db, session.userId, session.username, 'IMPORT_RESERVATIONS', `Imported ${insertedCount} reservations from CSV`, ip);
+      return new Response(JSON.stringify({ message: `Successfully imported ${insertedCount} reservations`, count: insertedCount }), { headers: resHeaders });
+    }
+
     if (url.pathname === '/api/reservations/export') {
       const { results } = await db.prepare("SELECT * FROM reservations ORDER BY date ASC, arrivalTime ASC").all();
       const reservations = (results || []).map(formatReservation);
